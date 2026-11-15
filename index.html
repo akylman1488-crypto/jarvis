@@ -1,0 +1,1539 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="J.A.R.V.I.S.">
+  <title>J.A.R.V.I.S. OS v3.5 — Cinematic Stark HUD &amp; Instant Voice Core</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Inter', sans-serif;
+      background: radial-gradient(circle at 50% 45%, #07192e 0%, #030812 58%, #010308 100%);
+      color: #e2e8f0;
+    }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .hud-text-glow { text-shadow: 0 0 14px rgba(56, 189, 248, 0.7); }
+    .holo-glass {
+      background: rgba(6, 15, 29, 0.82);
+      backdrop-filter: blur(22px);
+      -webkit-backdrop-filter: blur(22px);
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      box-shadow: 0 0 40px rgba(14, 165, 233, 0.14), inset 0 0 24px rgba(56, 189, 248, 0.05);
+    }
+    .hud-grid-bg {
+      background-image:
+        linear-gradient(to right, rgba(56, 189, 248, 0.04) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(56, 189, 248, 0.04) 1px, transparent 1px);
+      background-size: 48px 48px;
+    }
+    #hud-stage { cursor: pointer; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.3); border-radius: 999px; }
+  </style>
+</head>
+<body class="relative w-screen h-screen select-none hud-grid-bg">
+
+  <!-- FULLSCREEN HOLOGRAPHIC STAGE (Clickable 3D Reactor Core + Radial Audio Wave) -->
+  <div id="hud-stage" title="Нажми на ядро, чтобы говорить с J.A.R.V.I.S." class="absolute inset-0 z-0 flex items-center justify-center">
+    <canvas id="reactor-canvas" class="absolute inset-0 w-full h-full block"></canvas>
+    <canvas id="wave-canvas" class="absolute inset-0 w-full h-full block pointer-events-none"></canvas>
+
+    <!-- Dedicated Transparent Center Core Hit Target + Hint Pill -->
+    <button id="core-center-btn" type="button" aria-label="Говорить с J.A.R.V.I.S."
+      class="z-10 w-56 h-56 rounded-full bg-transparent hover:bg-sky-500/5 border border-sky-400/15 hover:border-sky-400/45 transition-all flex items-end justify-center pb-2 focus:outline-none">
+      <span id="core-tap-hint" class="px-4 py-1.5 rounded-full bg-slate-950/80 border border-sky-400/40 text-xs mono text-sky-300 tracking-wider uppercase shadow-[0_0_20px_rgba(56,189,248,0.25)]">
+        НАЖМИ НА ЯДРО — ГОВОРИТЬ
+      </span>
+    </button>
+  </div>
+
+  <!-- FLOATING QUICK COMMAND BAR OVER CORE (Appears on Core Tap if Mic blocked in preview or for instant dictation) -->
+  <div id="core-quick-bar" class="hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 w-[90vw] max-w-lg holo-glass rounded-full p-2 flex items-center gap-2 shadow-[0_0_50px_rgba(56,189,248,0.35)]">
+    <input id="core-quick-input" type="text" placeholder="Говори (микрофон клавиатуры Fn) или введи приказ и нажми Enter..."
+      class="flex-1 bg-transparent px-4 py-2 text-xs sm:text-sm text-sky-100 placeholder-sky-300/50 focus:outline-none mono">
+    <button id="core-quick-send" type="button" class="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-full transition">
+      Пуск
+    </button>
+    <button id="core-quick-close" type="button" class="text-sky-300 hover:text-white px-2.5 text-base">×</button>
+  </div>
+
+  <!-- CORNER HUD TELEMETRY -->
+  <header class="absolute top-0 left-0 right-0 z-20 px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
+    <!-- Top-Left Identity & Live Status -->
+    <div class="flex items-center gap-3 pointer-events-auto">
+      <div id="status-dot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shadow-[0_0_10px_#fbbf24]"></div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm sm:text-base font-bold tracking-widest text-sky-300 hud-text-glow mono">J.A.R.V.I.S. // HUD v3.5</span>
+          <span id="core-state-badge" class="text-[11px] mono px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-400/30">STANDBY</span>
+        </div>
+        <div id="conn-status-text" class="text-[11px] text-sky-200/60 mono">Автосохранение ключа активно</div>
+      </div>
+    </div>
+
+    <!-- Top-Right Compact Key & Brain Selector (Auto-collapses when saved!) -->
+    <div class="flex flex-wrap items-center gap-2 pointer-events-auto">
+      <!-- Collapsed Saved Key Badge -->
+      <div id="saved-key-pill" class="hidden flex items-center gap-1.5 bg-emerald-500/15 border border-emerald-400/40 rounded-full px-3 py-1 text-xs mono text-emerald-300">
+        <span>КЛЮЧ В ПАМЯТИ ✓</span>
+        <button id="bake-key-btn" type="button" title="Скачать файл HUD с навсегда вшитым в код ключом" class="underline text-sky-300 hover:text-white ml-1">Вшить навсегда</button>
+        <button id="change-key-btn" type="button" class="text-slate-400 hover:text-white ml-1">Изм.</button>
+      </div>
+
+      <!-- Key Input Row (auto-saves on paste/input!) -->
+      <div id="key-editor-row" class="flex flex-wrap items-center gap-1.5">
+        <input id="gemini-key-input" type="password" placeholder="Вставь GEMINI_API_KEY (автосохранение)"
+          class="bg-slate-950/75 backdrop-blur border border-sky-500/30 rounded-full px-3.5 py-1.5 text-xs mono text-sky-200 placeholder-slate-500 focus:outline-none focus:border-sky-400 w-48 sm:w-56">
+        <button id="save-key-btn" type="button"
+          class="bg-sky-500/90 hover:bg-sky-400 text-slate-950 font-semibold text-xs px-3.5 py-1.5 rounded-full transition shadow-[0_0_15px_rgba(56,189,248,0.4)]">
+          Подключить
+        </button>
+      </div>
+
+      <select id="gemini-model-select" title="Мозг каскада Gemini 4"
+        class="bg-slate-950/75 backdrop-blur border border-sky-500/30 rounded-full px-3 py-1.5 text-xs mono text-sky-200 focus:outline-none">
+        <option value="gemini-4-carbon">Carbon (Макс. ум)</option>
+        <option value="gemini-4-argon">Argon (Pro)</option>
+        <option value="gemini-4-hydrogen">Hydrogen (Free)</option>
+        <option value="gemini-2.5-flash">2.5 Flash</option>
+      </select>
+    </div>
+  </header>
+
+  <!-- FLOATING SUBTITLES & ARDUINO TELEMETRY -->
+  <div class="absolute bottom-24 left-4 right-4 sm:left-6 sm:right-6 z-10 flex flex-col sm:flex-row items-center sm:items-end justify-between gap-3 pointer-events-none">
+    <!-- Live Subtitles -->
+    <div class="max-w-xl w-full text-center sm:text-left">
+      <div id="subtitle-speaker" class="text-[11px] mono text-sky-400/80 tracking-wider uppercase mb-0.5">СИСТЕМА ГОТОВА</div>
+      <div id="subtitle-text" class="text-sm sm:text-base text-slate-100/95 font-medium leading-snug drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)]">
+        Нажми прямо на 3D-ядро в центре экрана и скажи команду (например: «Джарвис, открой на Ютубе сборку трикоптера»).
+      </div>
+      <a id="open-url-pill" href="https://www.google.com" target="_blank" rel="noopener noreferrer"
+        class="hidden pointer-events-auto inline-flex items-center gap-2 mt-2 bg-sky-500/20 hover:bg-sky-500/35 border border-sky-400/50 text-sky-200 text-xs mono px-3.5 py-1.5 rounded-full transition">
+        Открыть вкладку
+      </a>
+    </div>
+
+    <!-- Floating Arduino Telemetry Pills -->
+    <div class="flex flex-wrap items-center justify-center gap-2 text-[11px] mono text-sky-300/90">
+      <span id="hud-relay-readout" class="px-2.5 py-1 rounded-full bg-slate-950/60 border border-sky-500/25">D7: ВЫКЛ</span>
+      <span id="hud-servo-readout" class="px-2.5 py-1 rounded-full bg-slate-950/60 border border-sky-500/25">D9: 90°</span>
+      <span id="hud-radar-readout" class="px-2.5 py-1 rounded-full bg-slate-950/60 border border-sky-500/25">РАДАР: 48 см</span>
+    </div>
+  </div>
+
+  <!-- FLOATING HOLOGRAPHIC DOCK (Bottom Center) -->
+  <nav class="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 sm:gap-2 px-3 py-2 rounded-full holo-glass max-w-[96vw] overflow-x-auto">
+    <button id="live-voice-btn" type="button"
+      class="flex items-center gap-2 bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-full transition whitespace-nowrap shadow-[0_0_20px_rgba(56,189,248,0.5)]">
+      <span id="live-voice-label">Живой голос</span>
+    </button>
+    <button id="interrupt-btn" type="button" title="Мгновенно перебить речь Джарвиса"
+      class="hidden bg-rose-500/90 hover:bg-rose-400 text-white font-semibold text-xs px-3 py-2 rounded-full transition whitespace-nowrap">
+      Перебить
+    </button>
+    <div class="w-px h-5 bg-sky-500/25 mx-0.5"></div>
+    <button type="button" data-overlay="ov-chat" class="dock-btn text-xs mono text-sky-200 hover:text-white hover:bg-sky-500/20 px-3 py-2 rounded-full transition whitespace-nowrap">Чат</button>
+    <button type="button" data-overlay="ov-browser" class="dock-btn text-xs mono text-sky-200 hover:text-white hover:bg-sky-500/20 px-3 py-2 rounded-full transition whitespace-nowrap">Медиа/Браузер</button>
+    <button type="button" data-overlay="ov-webgen" class="dock-btn text-xs mono text-sky-200 hover:text-white hover:bg-sky-500/20 px-3 py-2 rounded-full transition whitespace-nowrap">Сайты</button>
+    <button type="button" data-overlay="ov-protocols" class="dock-btn text-xs mono text-sky-200 hover:text-white hover:bg-sky-500/20 px-3 py-2 rounded-full transition whitespace-nowrap">Протоколы</button>
+    <button type="button" data-overlay="ov-analysis" class="dock-btn text-xs mono text-sky-200 hover:text-white hover:bg-sky-500/20 px-3 py-2 rounded-full transition whitespace-nowrap">Анализы</button>
+    <button type="button" data-overlay="ov-vision" class="dock-btn text-xs mono text-sky-200 hover:text-white hover:bg-sky-500/20 px-3 py-2 rounded-full transition whitespace-nowrap">Камера</button>
+    <button type="button" data-overlay="ov-arduino" class="dock-btn text-xs mono text-sky-200 hover:text-white hover:bg-sky-500/20 px-3 py-2 rounded-full transition whitespace-nowrap">Arduino</button>
+  </nav>
+
+  <!-- Toast Notification -->
+  <div id="toast-box" class="fixed top-16 right-6 z-50 hidden holo-glass text-sky-200 px-4 py-2 rounded-full text-xs mono"></div>
+
+  <!-- ================= FLOATING HOLOGRAPHIC OVERLAYS ================= -->
+
+  <!-- OVERLAY 0: INSTANT HOLOGRAPHIC YOUTUBE & WEB LAUNCHER (Zero-click auto-open!) -->
+  <section id="ov-browser" class="hud-overlay hidden fixed inset-x-4 top-20 bottom-24 max-w-5xl mx-auto z-40 holo-glass rounded-3xl p-4 sm:p-5 flex flex-col gap-3">
+    <div class="flex items-center justify-between border-b border-sky-500/20 pb-2.5">
+      <span id="browser-ov-title" class="text-xs font-bold uppercase tracking-wider text-sky-300 mono">Голографический Медиа-Модуль и Авто-Браузер</span>
+      <div class="flex items-center gap-2">
+        <a id="browser-direct-link" href="https://www.youtube.com" target="_blank" rel="noopener noreferrer"
+          class="text-xs mono bg-sky-500/20 hover:bg-sky-500/35 text-sky-200 px-3 py-1 rounded-full border border-sky-400/40">
+          Развернуть во весь браузер ↗
+        </a>
+        <button type="button" class="close-ov-btn text-sky-300 hover:text-white text-lg leading-none px-2">×</button>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <input id="yt-quick-search" type="text" placeholder="Что сразу найти и включить на YouTube?"
+        class="flex-1 bg-slate-950/80 border border-sky-500/30 rounded-full px-4 py-1.5 text-xs text-slate-100 focus:outline-none">
+      <button id="yt-quick-btn" type="button" class="bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold text-xs px-4 py-1.5 rounded-full">
+        Запустить сразу
+      </button>
+    </div>
+    <div class="flex-1 bg-slate-950 rounded-2xl overflow-hidden border border-sky-500/25 relative">
+      <iframe id="holo-browser-frame" title="Встроенный плеер J.A.R.V.I.S." class="w-full h-full min-h-[280px] border-0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+    </div>
+  </section>
+
+  <!-- OVERLAY 1: CHAT & TEXT COMMANDS -->
+  <section id="ov-chat" class="hud-overlay hidden fixed inset-x-4 top-20 bottom-24 max-w-3xl mx-auto z-40 holo-glass rounded-3xl p-4 sm:p-5 flex flex-col gap-3">
+    <div class="flex items-center justify-between border-b border-sky-500/20 pb-2.5">
+      <span class="text-xs font-bold uppercase tracking-wider text-sky-300 mono">Диалог и команды (Каскад Gemini 4)</span>
+      <div class="flex items-center gap-3">
+        <button id="tts-toggle-btn" type="button" class="text-xs mono text-sky-300 hover:text-white">Озвучка: ВКЛ</button>
+        <button id="clear-chat-btn" type="button" class="text-xs mono text-slate-400 hover:text-white">Очистить</button>
+        <button type="button" class="close-ov-btn text-sky-300 hover:text-white text-lg leading-none px-2">×</button>
+      </div>
+    </div>
+
+    <div id="chat-messages" class="flex-1 overflow-y-auto space-y-2.5 pr-1 text-xs sm:text-sm">
+      <div class="bg-slate-950/60 border border-sky-500/25 rounded-2xl p-3">
+        <div class="text-[11px] mono text-sky-400 mb-1">J.A.R.V.I.S. v3.5 // AUTO-SAVE &amp; AUTO-OPEN</div>
+        <p class="text-slate-200 leading-relaxed">
+          Все 3 замечания исправлены: твой <span class="mono text-emerald-300">GEMINI_API_KEY</span> теперь сохраняется автоматически в 3 хранилищах сразу при вставке (плюс его можно навсегда вшить в код кнопкой сверху), центральное 3D-ядро включает распознавание голоса по клику, а запросы к YouTube и сайтам открываются автоматически без лишних подтверждений.
+        </p>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap gap-1.5">
+      <button type="button" data-prompt="Джарвис, активируй Протокол Олимпиада: включи свет на D7 и поверни серво D9 на 45 градусов"
+        class="preset-btn text-[11px] mono bg-sky-500/15 hover:bg-sky-500/30 border border-sky-500/30 text-sky-200 px-2.5 py-1 rounded-full transition">
+        Протокол Олимпиада
+      </button>
+      <button type="button" data-prompt="Джарвис, создай интерактивный сайт-калькулятор кинематики"
+        class="preset-btn text-[11px] mono bg-sky-500/15 hover:bg-sky-500/30 border border-sky-500/30 text-sky-200 px-2.5 py-1 rounded-full transition">
+        Создать сайт кинематики
+      </button>
+      <button type="button" data-prompt="Джарвис, сделай инженерный анализ тяги моего Y-трикоптера"
+        class="preset-btn text-[11px] mono bg-sky-500/15 hover:bg-sky-500/30 border border-sky-500/30 text-sky-200 px-2.5 py-1 rounded-full transition">
+        Анализ трикоптера
+      </button>
+      <button type="button" data-prompt="Джарвис, открой YouTube и найди видео по сборке Arduino трикоптера"
+        class="preset-btn text-[11px] mono bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/30 text-emerald-200 px-2.5 py-1 rounded-full transition">
+        Открыть YouTube
+      </button>
+    </div>
+
+    <form id="chat-form" class="flex gap-2">
+      <input id="chat-input" type="text" placeholder="Напиши команду Джарвису..."
+        class="flex-1 bg-slate-950/80 border border-sky-500/30 focus:border-sky-400 rounded-full px-4 py-2 text-xs sm:text-sm text-slate-100 focus:outline-none">
+      <button type="submit" class="bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold px-5 py-2 rounded-full text-xs sm:text-sm transition">
+        Отправить
+      </button>
+    </form>
+  </section>
+
+  <!-- OVERLAY 2: WEBSITE GENERATOR STUDIO -->
+  <section id="ov-webgen" class="hud-overlay hidden fixed inset-x-4 top-20 bottom-24 max-w-6xl mx-auto z-40 holo-glass rounded-3xl p-4 sm:p-5 flex flex-col gap-3">
+    <div class="flex items-center justify-between border-b border-sky-500/20 pb-2.5">
+      <span id="site-preview-title" class="text-xs font-bold uppercase tracking-wider text-sky-300 mono">Студия генерации сайтов на лету</span>
+      <button type="button" class="close-ov-btn text-sky-300 hover:text-white text-lg leading-none px-2">×</button>
+    </div>
+    <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0">
+      <div class="lg:col-span-5 flex flex-col gap-2.5 overflow-y-auto pr-1">
+        <div class="flex gap-2">
+          <input id="webgen-prompt-input" type="text" placeholder="Какой сайт или 3D-тренажёр создать?"
+            class="flex-1 bg-slate-950/80 border border-sky-500/30 rounded-xl px-3 py-2 text-xs text-slate-100">
+          <button id="webgen-run-btn" type="button" class="bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold text-xs px-3 py-2 rounded-xl">Создать</button>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+          <button type="button" data-template="kinematics" class="webgen-tpl-btn text-[11px] mono bg-slate-950/80 border border-sky-500/30 text-sky-300 px-2.5 py-1 rounded-lg">Кинематика</button>
+          <button type="button" data-template="tricopter" class="webgen-tpl-btn text-[11px] mono bg-slate-950/80 border border-emerald-500/30 text-emerald-300 px-2.5 py-1 rounded-lg">Y-Трикоптер</button>
+          <button type="button" data-template="cyber" class="webgen-tpl-btn text-[11px] mono bg-slate-950/80 border border-amber-500/30 text-amber-300 px-2.5 py-1 rounded-lg">Шифры</button>
+        </div>
+        <textarea id="site-code-editor" class="flex-1 min-h-[160px] bg-slate-950/80 border border-sky-500/20 rounded-xl p-2.5 text-xs mono text-slate-300 focus:outline-none"></textarea>
+        <div class="flex flex-wrap gap-2">
+          <button id="webgen-apply-code-btn" type="button" class="bg-slate-800 hover:bg-slate-700 text-xs px-3 py-1.5 rounded-lg">Обновить превью</button>
+          <button id="webgen-open-tab-btn" type="button" class="bg-sky-500/20 text-sky-300 text-xs px-3 py-1.5 rounded-lg mono">Открыть в вкладке</button>
+          <button id="webgen-download-btn" type="button" class="bg-emerald-500/20 text-emerald-300 text-xs px-3 py-1.5 rounded-lg mono">Скачать .html</button>
+        </div>
+      </div>
+      <div class="lg:col-span-7 bg-slate-950 rounded-2xl overflow-hidden border border-sky-500/25">
+        <iframe id="site-preview-frame" title="Превью созданного сайта" class="w-full h-full min-h-[260px] border-0"></iframe>
+      </div>
+    </div>
+  </section>
+
+  <!-- OVERLAY 3: STARK PROTOCOLS -->
+  <section id="ov-protocols" class="hud-overlay hidden fixed inset-x-4 top-20 bottom-24 max-w-4xl mx-auto z-40 holo-glass rounded-3xl p-4 sm:p-5 flex flex-col gap-3">
+    <div class="flex items-center justify-between border-b border-sky-500/20 pb-2.5">
+      <span class="text-xs font-bold uppercase tracking-wider text-sky-300 mono">Протоколы Старка (Аппаратные + Цифровые макросы)</span>
+      <button type="button" class="close-ov-btn text-sky-300 hover:text-white text-lg leading-none px-2">×</button>
+    </div>
+    <div class="flex-1 grid grid-cols-1 md:grid-cols-12 gap-3 overflow-y-auto">
+      <div id="protocols-grid" class="md:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-2.5 content-start"></div>
+      <form id="new-proto-form" class="md:col-span-5 bg-slate-950/70 border border-sky-500/20 rounded-2xl p-3.5 flex flex-col gap-2.5 text-xs">
+        <span class="font-bold text-sky-300 mono">Создать свой протокол</span>
+        <input id="proto-name-in" type="text" placeholder="Название (напр. Ночной Кодинг)" required class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-slate-100">
+        <input id="proto-cmds-in" type="text" placeholder="RELAY:1, SERVO:60, RADAR:SCAN" required class="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 mono text-sky-300">
+        <textarea id="proto-desc-in" rows="3" placeholder="Что делает протокол?" required class="bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-slate-200"></textarea>
+        <button type="submit" class="bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold py-2 rounded-lg transition">Сохранить</button>
+      </form>
+    </div>
+  </section>
+
+  <!-- OVERLAY 4: ENGINEERING ANALYSES -->
+  <section id="ov-analysis" class="hud-overlay hidden fixed inset-x-4 top-20 bottom-24 max-w-5xl mx-auto z-40 holo-glass rounded-3xl p-4 sm:p-5 flex flex-col gap-3">
+    <div class="flex items-center justify-between border-b border-sky-500/20 pb-2.5">
+      <span id="analysis-title-head" class="text-xs font-bold uppercase tracking-wider text-sky-300 mono">Инженерные анализы и расчёты</span>
+      <button type="button" class="close-ov-btn text-sky-300 hover:text-white text-lg leading-none px-2">×</button>
+    </div>
+    <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3 min-h-0 overflow-y-auto">
+      <div class="lg:col-span-4 flex flex-col gap-2">
+        <textarea id="analysis-topic-in" rows="2" placeholder="Тема расчёта (трикоптер, физика, кибербезопасность)..." class="bg-slate-950/80 border border-sky-500/30 rounded-xl p-2.5 text-xs text-slate-100"></textarea>
+        <div class="flex gap-2">
+          <button id="run-analysis-btn" type="button" class="flex-1 bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold text-xs py-2 rounded-xl">Рассчитать</button>
+          <button id="download-report-btn" type="button" class="bg-slate-800 text-xs px-3 py-2 rounded-xl mono">.md</button>
+        </div>
+        <div id="analysis-history-list" class="flex flex-col gap-1.5 overflow-y-auto"></div>
+      </div>
+      <div class="lg:col-span-8 flex flex-col gap-2">
+        <div id="analysis-metrics-grid" class="grid grid-cols-1 sm:grid-cols-3 gap-2"></div>
+        <div id="analysis-report-view" class="flex-1 bg-slate-950/70 border border-sky-500/20 rounded-2xl p-3.5 text-xs sm:text-sm text-slate-200 whitespace-pre-wrap overflow-y-auto"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- OVERLAY 5: CAMERA VISION -->
+  <section id="ov-vision" class="hud-overlay hidden fixed inset-x-4 top-20 bottom-24 max-w-4xl mx-auto z-40 holo-glass rounded-3xl p-4 sm:p-5 flex flex-col gap-3">
+    <div class="flex items-center justify-between border-b border-sky-500/20 pb-2.5">
+      <span class="text-xs font-bold uppercase tracking-wider text-sky-300 mono">Оптический сенсор (Камера iPad / Фото тетради и плат)</span>
+      <button type="button" class="close-ov-btn text-sky-300 hover:text-white text-lg leading-none px-2">×</button>
+    </div>
+    <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3 min-h-0 overflow-y-auto">
+      <div class="flex flex-col gap-2.5">
+        <div class="relative h-56 bg-slate-950 rounded-2xl overflow-hidden border border-sky-500/25 flex items-center justify-center">
+          <video id="cam-video" autoplay playsinline muted class="w-full h-full object-cover hidden"></video>
+          <canvas id="cam-capture-canvas" class="w-full h-full object-contain hidden"></canvas>
+          <div id="cam-placeholder" class="text-center p-4 text-xs text-slate-400">Включи камеру или загрузи фото задачи/схемы</div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button id="start-cam-btn" type="button" class="bg-sky-500/20 border border-sky-400/50 text-sky-200 text-xs px-3 py-1.5 rounded-xl">Включить камеру</button>
+          <button id="snap-cam-btn" type="button" class="bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 text-xs px-3 py-1.5 rounded-xl">Разобрать кадр</button>
+          <label class="bg-slate-800 text-slate-200 text-xs px-3 py-1.5 rounded-xl cursor-pointer">Фото файла<input id="file-img-input" type="file" accept="image/*" class="hidden"></label>
+        </div>
+      </div>
+      <div class="flex flex-col gap-2">
+        <input id="vision-prompt-input" type="text" value="Проверь решение задачи по физике или схему подключения Arduino на этом фото." class="bg-slate-950/80 border border-sky-500/30 rounded-xl px-3 py-2 text-xs text-slate-100">
+        <div id="vision-output" class="flex-1 bg-slate-950/70 border border-sky-500/20 rounded-2xl p-3 text-xs sm:text-sm text-slate-200 whitespace-pre-wrap overflow-y-auto">Ответ зрительного модуля появится здесь...</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- OVERLAY 6: ARDUINO UNO WEB SERIAL -->
+  <section id="ov-arduino" class="hud-overlay hidden fixed inset-x-4 top-20 bottom-24 max-w-5xl mx-auto z-40 holo-glass rounded-3xl p-4 sm:p-5 flex flex-col gap-3">
+    <div class="flex items-center justify-between border-b border-sky-500/20 pb-2.5">
+      <span class="text-xs font-bold uppercase tracking-wider text-sky-300 mono">Аппаратный мост Arduino Uno (Web Serial 115200 бод)</span>
+      <div class="flex items-center gap-2">
+        <button id="serial-connect-btn" type="button" class="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs px-3 py-1 rounded-full">Подключить USB</button>
+        <button type="button" class="close-ov-btn text-sky-300 hover:text-white text-lg leading-none px-2">×</button>
+      </div>
+    </div>
+    <div class="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-3 min-h-0 overflow-y-auto">
+      <div class="flex flex-col gap-3">
+        <div class="grid grid-cols-3 gap-2">
+          <div class="bg-slate-950/80 border border-sky-500/20 rounded-xl p-2.5 flex flex-col gap-1.5">
+            <span class="text-[11px] mono text-slate-400">D7 Реле</span>
+            <span id="pin-d7-state" class="text-xs font-bold mono text-amber-300">LOW</span>
+            <div class="flex gap-1">
+              <button type="button" data-serial="RELAY:1" class="hw-cmd-btn flex-1 bg-sky-500/20 text-sky-300 text-[11px] py-1 rounded mono">ВКЛ</button>
+              <button type="button" data-serial="RELAY:0" class="hw-cmd-btn flex-1 bg-slate-800 text-slate-300 text-[11px] py-1 rounded mono">ВЫКЛ</button>
+            </div>
+          </div>
+          <div class="bg-slate-950/80 border border-sky-500/20 rounded-xl p-2.5 flex flex-col gap-1.5">
+            <span class="text-[11px] mono text-slate-400">D9 Серво: <b id="servo-angle-label" class="text-sky-300">90°</b></span>
+            <input id="servo-slider" type="range" min="0" max="180" value="90" class="w-full accent-sky-400">
+            <button id="send-servo-btn" type="button" class="bg-sky-500/20 text-sky-300 text-[11px] py-1 rounded mono">SERVO:90</button>
+          </div>
+          <div class="bg-slate-950/80 border border-sky-500/20 rounded-xl p-2.5 flex flex-col gap-1.5">
+            <span class="text-[11px] mono text-slate-400">D10/11 Радар</span>
+            <span id="radar-cm-label" class="text-xs font-bold mono text-emerald-300">48 см</span>
+            <button type="button" data-serial="RADAR:SCAN" class="hw-cmd-btn bg-emerald-500/20 text-emerald-300 text-[11px] py-1 rounded mono">SCAN</button>
+          </div>
+        </div>
+        <div id="serial-log" class="flex-1 min-h-[140px] bg-slate-950/80 border border-sky-500/20 rounded-xl p-2.5 text-xs mono text-emerald-300 overflow-y-auto space-y-1">
+          <div>[UART] Ожидание подключения USB-порта Arduino Uno...</div>
+        </div>
+      </div>
+      <div class="flex flex-col gap-2">
+        <div class="flex justify-between items-center">
+          <span class="text-xs mono text-slate-400">Скетч Arduino Uno (для Arduino Cloud):</span>
+          <button id="copy-ino-btn" type="button" class="text-xs mono text-sky-300 hover:underline">Копировать код</button>
+        </div>
+        <pre id="arduino-code-block" class="flex-1 bg-slate-950/80 border border-sky-500/20 rounded-xl p-2.5 text-[11px] mono text-slate-300 overflow-auto">#include &lt;Servo.h&gt;
+Servo jarvisServo;
+const int PIN_RELAY = 7, PIN_SERVO = 9, PIN_TRIG = 10, PIN_ECHO = 11;
+String cmd = "";
+
+long readRadarCm() {
+  digitalWrite(PIN_TRIG, LOW); delayMicroseconds(2);
+  digitalWrite(PIN_TRIG, HIGH); delayMicroseconds(10);
+  digitalWrite(PIN_TRIG, LOW);
+  long dur = pulseIn(PIN_ECHO, HIGH, 25000);
+  return dur == 0 ? 120 : dur * 0.034 / 2;
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PIN_RELAY, OUTPUT); pinMode(PIN_TRIG, OUTPUT); pinMode(PIN_ECHO, INPUT);
+  jarvisServo.attach(PIN_SERVO); jarvisServo.write(90);
+}
+
+void loop() {
+  while (Serial.available() &gt; 0) {
+    char c = Serial.read();
+    if (c == '\n') {
+      cmd.trim();
+      if (cmd == "RELAY:1") digitalWrite(PIN_RELAY, HIGH);
+      else if (cmd == "RELAY:0") digitalWrite(PIN_RELAY, LOW);
+      else if (cmd.startsWith("SERVO:")) jarvisServo.write(constrain(cmd.substring(6).toInt(), 0, 180));
+      Serial.print("{\"cmd\":\""); Serial.print(cmd);
+      Serial.print("\",\"cm\":"); Serial.print(readRadarCm()); Serial.println("}");
+      cmd = "";
+    } else cmd += c;
+  }
+}</pre>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    // ================= 1. PERMANENT KEY STORAGE (TRIPLE VAULT + BAKED KEY) =================
+    const BAKED_GEMINI_KEY = ""; // При нажатии «Вшить навсегда» сюда прописывается твой ключ!
+    let geminiApiKey = BAKED_GEMINI_KEY;
+    let selectedModel = 'gemini-4-carbon';
+    let ttsEnabled = true;
+    let hwState = { relay: 0, servo: 90, radarCm: 48 };
+    let serialPort = null, serialWriter = null;
+    let capturedImageBase64 = null, capturedMimeType = 'image/jpeg';
+
+    // Audio / Voice State
+    let liveWs = null;
+    let isLiveSessionActive = false;
+    let isCoreSpeechListening = false;
+    let coreSpeechRec = null;
+    let audioCtx = null;
+    let micStream = null;
+    let micProcessor = null;
+    let activePlaybackSources = [];
+    let nextPlayTime = 0;
+    let audioEnergyLevel = 0;
+
+    function playHudBeep(freq = 660, dur = 0.09) {
+      try {
+        const ctx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + dur);
+      } catch (e) {}
+    }
+
+    function showToast(msg) {
+      const box = document.getElementById('toast-box');
+      box.textContent = msg;
+      box.classList.remove('hidden');
+      setTimeout(() => box.classList.add('hidden'), 3200);
+    }
+
+    function setSubtitles(speaker, text) {
+      document.getElementById('subtitle-speaker').textContent = speaker;
+      document.getElementById('subtitle-text').textContent = text;
+    }
+
+    function openOverlay(id) {
+      document.querySelectorAll('.hud-overlay').forEach(el => el.classList.add('hidden'));
+      const target = document.getElementById(id);
+      if (target) target.classList.remove('hidden');
+    }
+
+    function closeAllOverlays() {
+      document.querySelectorAll('.hud-overlay').forEach(el => el.classList.add('hidden'));
+    }
+
+    document.querySelectorAll('.dock-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-overlay');
+        const el = document.getElementById(id);
+        if (el && !el.classList.contains('hidden')) closeAllOverlays();
+        else openOverlay(id);
+      });
+    });
+
+    document.querySelectorAll('.close-ov-btn').forEach(btn => btn.addEventListener('click', closeAllOverlays));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllOverlays(); });
+
+    // Triple-vault key persistence (localStorage + sessionStorage + window.name survives iframe reloads!)
+    function saveKeyToVault(val) {
+      const clean = (val || '').trim();
+      if (!clean) return;
+      geminiApiKey = clean;
+      try { localStorage.setItem('JARVIS_GEMINI_KEY', clean); } catch (e) {}
+      try { sessionStorage.setItem('JARVIS_GEMINI_KEY', clean); } catch (e) {}
+      try { window.name = 'JARVIS_KEY:' + clean; } catch (e) {}
+      setConnectedKeyUI(true, selectedModel);
+    }
+
+    function loadKeyFromVault() {
+      if (BAKED_GEMINI_KEY && BAKED_GEMINI_KEY.length > 10) {
+        saveKeyToVault(BAKED_GEMINI_KEY);
+        return;
+      }
+      let found = '';
+      try { found = localStorage.getItem('JARVIS_GEMINI_KEY') || ''; } catch (e) {}
+      if (!found) {
+        try { found = sessionStorage.getItem('JARVIS_GEMINI_KEY') || ''; } catch (e) {}
+      }
+      if (!found && typeof window.name === 'string' && window.name.startsWith('JARVIS_KEY:')) {
+        found = window.name.slice('JARVIS_KEY:'.length);
+      }
+      if (found) {
+        geminiApiKey = found;
+        document.getElementById('gemini-key-input').value = found;
+        setConnectedKeyUI(true, selectedModel);
+      }
+    }
+
+    function setConnectedKeyUI(isReady, activeName = '') {
+      const dot = document.getElementById('status-dot');
+      const txt = document.getElementById('conn-status-text');
+      const pill = document.getElementById('saved-key-pill');
+      const editorRow = document.getElementById('key-editor-row');
+      if (isReady) {
+        dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_#34d399]';
+        txt.textContent = `Ядро: ${activeName || selectedModel} | Ключ сохранён автоматически`;
+        pill.classList.remove('hidden');
+        editorRow.classList.add('hidden');
+      } else {
+        dot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+        txt.textContent = 'Вставь GEMINI_API_KEY один раз — он сохранится автоматически';
+        pill.classList.add('hidden');
+        editorRow.classList.remove('hidden');
+      }
+    }
+
+    // Auto-save immediately on paste or input (no need to even click "Подключить"!)
+    document.getElementById('gemini-key-input').addEventListener('input', (e) => {
+      const v = e.target.value.trim();
+      if (v.startsWith('AIza') && v.length >= 30) {
+        saveKeyToVault(v);
+        showToast('Ключ автоматически сохранён в память!');
+      }
+    });
+
+    document.getElementById('save-key-btn').addEventListener('click', () => {
+      const val = document.getElementById('gemini-key-input').value.trim();
+      selectedModel = document.getElementById('gemini-model-select').value;
+      if (!val) { showToast('Вставь GEMINI_API_KEY в поле'); return; }
+      saveKeyToVault(val);
+      showToast('Ключ сохранён! Больше вводить его не нужно.');
+    });
+
+    document.getElementById('change-key-btn').addEventListener('click', () => {
+      document.getElementById('saved-key-pill').classList.add('hidden');
+      document.getElementById('key-editor-row').classList.remove('hidden');
+      document.getElementById('gemini-key-input').focus();
+    });
+
+    // Bake key permanently into downloadable HTML file
+    document.getElementById('bake-key-btn').addEventListener('click', () => {
+      if (!geminiApiKey) return;
+      const htmlSrc = document.documentElement.outerHTML.replace(
+        'const BAKED_GEMINI_KEY = "";',
+        `const BAKED_GEMINI_KEY = "${geminiApiKey.replace(/"/g, '')}";`
+      );
+      const blob = new Blob(['<!DOCTYPE html>\n' + htmlSrc], { type: 'text/html;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'jarvis_os_with_my_key.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('Скачан файл со вшитым навсегда ключом!');
+    });
+
+    document.getElementById('gemini-model-select').addEventListener('change', (e) => {
+      selectedModel = e.target.value;
+      if (geminiApiKey) setConnectedKeyUI(true, selectedModel);
+    });
+
+    // ================= 2. 3D HOLOGRAPHIC REACTOR & CENTRAL CORE VOICE TRIGGER =================
+    let innerCore, ring1, ring2, ring3, particles;
+    let coreSpeed = 0.012;
+
+    function initHologramHUD() {
+      const container = document.getElementById('hud-stage');
+      const canvas = document.getElementById('reactor-canvas');
+      const waveCanvas = document.getElementById('wave-canvas');
+      const wCtx = waveCanvas.getContext('2d');
+
+      if (window.THREE && canvas) {
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(48, container.clientWidth / container.clientHeight, 0.1, 100);
+        camera.position.z = 6.2;
+
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+        innerCore = new THREE.Mesh(
+          new THREE.IcosahedronGeometry(0.95, 2),
+          new THREE.MeshBasicMaterial({ color: 0x38bdf8, wireframe: true, transparent: true, opacity: 0.85 })
+        );
+        scene.add(innerCore);
+
+        ring1 = new THREE.Mesh(
+          new THREE.TorusGeometry(1.55, 0.025, 16, 96),
+          new THREE.MeshBasicMaterial({ color: 0x0ea5e9, transparent: true, opacity: 0.75 })
+        );
+        ring1.rotation.x = Math.PI / 2.6;
+        scene.add(ring1);
+
+        ring2 = new THREE.Mesh(
+          new THREE.TorusGeometry(2.05, 0.018, 12, 96),
+          new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.5 })
+        );
+        ring2.rotation.y = Math.PI / 3;
+        scene.add(ring2);
+
+        ring3 = new THREE.Mesh(
+          new THREE.TorusGeometry(2.45, 0.012, 12, 120),
+          new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.3 })
+        );
+        scene.add(ring3);
+
+        const pGeo = new THREE.BufferGeometry();
+        const pCount = 180;
+        const pos = new Float32Array(pCount * 3);
+        for (let i = 0; i < pCount; i++) {
+          const r = 1.8 + Math.random() * 1.4;
+          const th = Math.random() * Math.PI * 2;
+          const ph = Math.acos(2 * Math.random() - 1);
+          pos[i * 3] = r * Math.sin(ph) * Math.cos(th);
+          pos[i * 3 + 1] = r * Math.sin(ph) * Math.sin(th);
+          pos[i * 3 + 2] = r * Math.cos(ph);
+        }
+        pGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        particles = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x7dd3fc, size: 0.035, transparent: true, opacity: 0.7 }));
+        scene.add(particles);
+
+        window.addEventListener('resize', () => {
+          camera.aspect = container.clientWidth / container.clientHeight;
+          camera.updateProjectionMatrix();
+          renderer.setSize(container.clientWidth, container.clientHeight);
+        });
+
+        let phase = 0;
+        function renderLoop() {
+          requestAnimationFrame(renderLoop);
+          phase += 0.03;
+          const listeningBoost = isCoreSpeechListening ? 0.22 * Math.sin(phase * 3) : 0;
+          const scalePulse = 1 + audioEnergyLevel * 0.28 + Math.max(0, listeningBoost);
+          innerCore.scale.set(scalePulse, scalePulse, scalePulse);
+          innerCore.rotation.y += coreSpeed + audioEnergyLevel * 0.04;
+          innerCore.rotation.x += coreSpeed * 0.5;
+          ring1.rotation.z += 0.012 + audioEnergyLevel * 0.03;
+          ring2.rotation.z -= 0.009;
+          ring2.rotation.x += 0.005;
+          ring3.rotation.y += 0.004;
+          particles.rotation.y -= 0.003;
+          renderer.render(scene, camera);
+
+          const dpr = window.devicePixelRatio || 1;
+          const w = container.clientWidth, h = container.clientHeight;
+          if (waveCanvas.width !== Math.floor(w * dpr) || waveCanvas.height !== Math.floor(h * dpr)) {
+            waveCanvas.width = Math.floor(w * dpr);
+            waveCanvas.height = Math.floor(h * dpr);
+          }
+          wCtx.save();
+          wCtx.scale(dpr, dpr);
+          wCtx.clearRect(0, 0, w, h);
+          const cx = w / 2, cy = h / 2;
+          const baseRad = Math.min(w, h) * 0.25;
+          const bars = 72;
+          const activeWave = isLiveSessionActive || isCoreSpeechListening;
+          wCtx.strokeStyle = activeWave ? 'rgba(52, 211, 153, 0.7)' : 'rgba(56, 189, 248, 0.35)';
+          wCtx.lineWidth = 2;
+          for (let i = 0; i < bars; i++) {
+            const ang = (i / bars) * Math.PI * 2;
+            const extra = isCoreSpeechListening ? 14 * Math.abs(Math.sin(phase * 2.5 + i * 0.3)) : 0;
+            const amp = 4 + extra + Math.sin(phase * 2 + i * 0.45) * (4 + audioEnergyLevel * 38);
+            wCtx.beginPath();
+            wCtx.moveTo(cx + Math.cos(ang) * baseRad, cy + Math.sin(ang) * baseRad);
+            wCtx.lineTo(cx + Math.cos(ang) * (baseRad + Math.max(2, amp)), cy + Math.sin(ang) * (baseRad + Math.max(2, amp)));
+            wCtx.stroke();
+          }
+          wCtx.restore();
+          audioEnergyLevel *= 0.88;
+        }
+        renderLoop();
+      }
+    }
+
+    function setReactorMode(mode) {
+      document.getElementById('core-state-badge').textContent = mode;
+      const hint = document.getElementById('core-tap-hint');
+      if (!innerCore) return;
+      if (mode === 'LISTENING' || mode === 'LIVE VOICE') {
+        innerCore.material.color.setHex(0x34d399);
+        coreSpeed = 0.032;
+        if (hint) {
+          hint.textContent = 'СЛУШАЮ ТЕБЯ... (НАЖМИ ЧТОБЫ ОСТАНОВИТЬ)';
+          hint.className = 'pointer-events-none z-10 mt-64 px-4 py-1.5 rounded-full bg-emerald-950/85 border border-emerald-400/60 text-xs mono text-emerald-300 tracking-wider uppercase shadow-[0_0_25px_rgba(52,211,153,0.4)]';
+        }
+      } else if (mode === 'THINKING') {
+        innerCore.material.color.setHex(0xfacc15);
+        coreSpeed = 0.045;
+        if (hint) hint.textContent = 'ОБРАБАТЫВАЮ КОМАНДУ...';
+      } else if (mode === 'INTERRUPTED') {
+        innerCore.material.color.setHex(0xf43f5e);
+        coreSpeed = 0.06;
+      } else {
+        innerCore.material.color.setHex(0x38bdf8);
+        coreSpeed = 0.012;
+        if (hint) {
+          hint.textContent = 'НАЖМИ НА ЯДРО — ГОВОРИТЬ';
+          hint.className = 'pointer-events-none z-10 mt-64 px-4 py-1.5 rounded-full bg-slate-950/75 border border-sky-400/40 text-xs mono text-sky-300 tracking-wider uppercase shadow-[0_0_20px_rgba(56,189,248,0.25)]';
+        }
+      }
+    }
+
+    // Central Core Click Handler: Interrupts if speaking, otherwise starts instant Voice Recognition!
+    function triggerCentralCoreVoice() {
+      // 1. If Jarvis is currently speaking, interrupt immediately and start listening
+      if (activePlaybackSources.length > 0 || (window.speechSynthesis && window.speechSynthesis.speaking)) {
+        interruptJarvisAudio();
+      }
+
+      // 2. If already listening, stop listening
+      if (isCoreSpeechListening && coreSpeechRec) {
+        try { coreSpeechRec.stop(); } catch (e) {}
+        isCoreSpeechListening = false;
+        setReactorMode('STANDBY');
+        return;
+      }
+
+      playHudBeep(740, 0.08);
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRec) {
+        openQuickCommandBar();
+        return;
+      }
+
+      try {
+        coreSpeechRec = new SpeechRec();
+        coreSpeechRec.lang = 'ru-RU';
+        coreSpeechRec.interimResults = true;
+        coreSpeechRec.maxAlternatives = 1;
+        isCoreSpeechListening = true;
+        setReactorMode('LISTENING');
+        setSubtitles('МИКРОФОН ЯДРА АКТИВЕН', 'Говори команду прямо сейчас...');
+
+        let finalTranscript = '';
+        coreSpeechRec.onresult = (e) => {
+          let interim = '';
+          for (let i = e.resultIndex; i < e.results.length; i++) {
+            const t = e.results[i][0].transcript;
+            if (e.results[i].isFinal) finalTranscript += t;
+            else interim += t;
+          }
+          audioEnergyLevel = 0.65;
+          setSubtitles('ТЫ ГОВОРИШЬ:', finalTranscript || interim);
+        };
+
+        coreSpeechRec.onerror = () => {
+          isCoreSpeechListening = false;
+          setReactorMode('STANDBY');
+          openQuickCommandBar();
+        };
+
+        coreSpeechRec.onend = () => {
+          isCoreSpeechListening = false;
+          if (finalTranscript.trim()) {
+            playHudBeep(880, 0.08);
+            handleUserMessage(finalTranscript.trim(), true);
+          } else {
+            setReactorMode('STANDBY');
+          }
+        };
+
+        coreSpeechRec.start();
+      } catch (e) {
+        openQuickCommandBar();
+      }
+    }
+
+    function openQuickCommandBar() {
+      const bar = document.getElementById('core-quick-bar');
+      const inp = document.getElementById('core-quick-input');
+      bar.classList.remove('hidden');
+      inp.focus();
+      setSubtitles('БЫСТРЫЙ ВВОД ЯДРА', 'В окне превью браузер ограничил микрофон — продиктуй кнопкой микрофона на клавиатуре (Fn) или напиши сюда!');
+    }
+
+    document.getElementById('core-quick-close').addEventListener('click', () => {
+      document.getElementById('core-quick-bar').classList.add('hidden');
+    });
+
+    function submitQuickBar() {
+      const inp = document.getElementById('core-quick-input');
+      const val = inp.value.trim();
+      if (!val) return;
+      inp.value = '';
+      document.getElementById('core-quick-bar').classList.add('hidden');
+      handleUserMessage(val, true);
+    }
+
+    document.getElementById('core-quick-send').addEventListener('click', submitQuickBar);
+    document.getElementById('core-quick-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitQuickBar();
+      }
+    });
+
+    document.getElementById('core-center-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      triggerCentralCoreVoice();
+    });
+    document.getElementById('hud-stage').addEventListener('click', (e) => {
+      if (e.target.id === 'reactor-canvas' || e.target.id === 'hud-stage') {
+        triggerCentralCoreVoice();
+      }
+    });
+
+    // ================= 3. INSTANT AUTO-OPEN FOR YOUTUBE & WEBSITES (NO CLICK REQUIRED!) =================
+    function detectImmediateUrlIntent(text) {
+      const low = text.toLowerCase();
+      const hasOpenVerb = low.includes('открой') || low.includes('включи') || low.includes('запусти') || low.includes('найди на ютуб') || low.includes('найди в ютуб') || low.includes('покажи на ютуб');
+      if (low.includes('ютуб') || low.includes('youtube')) {
+        const cleaned = text
+          .replace(/джарвис/gi, '')
+          .replace(/\b(открой|включи|запусти|найди|покажи|мне|пожалуйста|просто|на|в|ютубе|ютуб|youtube|видео|про|по)\b/gi, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!cleaned) {
+          return {
+            type: 'youtube',
+            query: '',
+            externalUrl: 'https://www.youtube.com',
+            embedUrl: '',
+            title: 'YouTube (Главная)'
+          };
+        }
+        return {
+          type: 'youtube',
+          query: cleaned,
+          externalUrl: `https://www.youtube.com/results?search_query=${encodeURIComponent(cleaned)}`,
+          embedUrl: '',
+          title: `YouTube: ${cleaned}`
+        };
+      }
+      if (hasOpenVerb && (low.includes('гитхаб') || low.includes('github'))) {
+        return {
+          type: 'web',
+          query: 'GitHub',
+          externalUrl: 'https://github.com/akylman1488-crypto',
+          embedUrl: '',
+          title: 'GitHub: akylman1488-crypto'
+        };
+      }
+      if (hasOpenVerb && (low.includes('гугл') || low.includes('google') || low.includes('поиск'))) {
+        const q = text.replace(/джарвис|открой|гугл|google|поиск|найди/gi, '').trim() || 'физика кинематика формулы';
+        return {
+          type: 'web',
+          query: q,
+          externalUrl: `https://www.google.com/search?q=${encodeURIComponent(q)}&igu=1`,
+          embedUrl: `https://www.google.com/search?q=${encodeURIComponent(q)}&igu=1`,
+          title: `Google: ${q}`
+        };
+      }
+      return null;
+    }
+
+    function autoLaunchBrowserOrYouTube(intentObj) {
+      const { externalUrl, embedUrl, title, query } = intentObj;
+      // 1. Try opening a real new browser tab synchronously (works immediately when triggered from user gesture!)
+      let openedTab = null;
+      try {
+        openedTab = window.open(externalUrl, '_blank', 'noopener,noreferrer');
+      } catch (e) {}
+      if (!openedTab) {
+        try {
+          const a = document.createElement('a');
+          a.href = externalUrl;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        } catch (e) {}
+      }
+
+      // 2. Sync Media/Browser overlay state cleanly (never leave stale search query or broken Error 153 embed!)
+      const frame = document.getElementById('holo-browser-frame');
+      const dirLink = document.getElementById('browser-direct-link');
+      const ovTitle = document.getElementById('browser-ov-title');
+      const searchIn = document.getElementById('yt-quick-search');
+      if (dirLink) dirLink.href = externalUrl;
+      if (ovTitle) ovTitle.textContent = title;
+      if (searchIn) searchIn.value = query || '';
+      if (frame) frame.src = 'about:blank';
+
+      const pill = document.getElementById('open-url-pill');
+      if (pill) {
+        pill.href = externalUrl;
+        pill.textContent = `Открыто: ${title} ↗`;
+        pill.classList.remove('hidden');
+      }
+      showToast(`Автоматически запущено: ${title}`);
+    }
+
+    document.getElementById('yt-quick-btn').addEventListener('click', () => {
+      const q = document.getElementById('yt-quick-search').value.trim();
+      autoLaunchBrowserOrYouTube({
+        type: 'youtube',
+        query: q,
+        externalUrl: q ? `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}` : 'https://www.youtube.com',
+        embedUrl: '',
+        title: q ? `YouTube: ${q}` : 'YouTube (Главная)'
+      });
+    });
+
+    // ================= 4. GEMINI LIVE API (NATIVE VOICE + BARGE-IN) =================
+    function interruptJarvisAudio() {
+      activePlaybackSources.forEach(src => { try { src.stop(); } catch (e) {} });
+      activePlaybackSources = [];
+      if (audioCtx) nextPlayTime = audioCtx.currentTime;
+      if ('speechSynthesis' in window) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+      document.getElementById('interrupt-btn').classList.add('hidden');
+      setReactorMode('INTERRUPTED');
+      setTimeout(() => setReactorMode(isLiveSessionActive ? 'LIVE VOICE' : 'STANDBY'), 400);
+    }
+
+    function playPcm24kBase64(base64Str) {
+      if (!audioCtx) return;
+      const bin = atob(base64Str);
+      const len = bin.length / 2;
+      const float32 = new Float32Array(len);
+      let peak = 0;
+      for (let i = 0; i < len; i++) {
+        const lo = bin.charCodeAt(i * 2);
+        const hi = bin.charCodeAt(i * 2 + 1);
+        let s = (hi << 8) | lo;
+        if (s >= 0x8000) s -= 0x10000;
+        const f = s / 32768;
+        float32[i] = f;
+        if (Math.abs(f) > peak) peak = Math.abs(f);
+      }
+      audioEnergyLevel = Math.min(1, Math.max(audioEnergyLevel, peak * 1.8));
+      const buf = audioCtx.createBuffer(1, len, 24000);
+      buf.copyToChannel(float32, 0);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(audioCtx.destination);
+      const now = audioCtx.currentTime;
+      if (nextPlayTime < now) nextPlayTime = now;
+      src.start(nextPlayTime);
+      nextPlayTime += buf.duration;
+      activePlaybackSources.push(src);
+      document.getElementById('interrupt-btn').classList.remove('hidden');
+      src.onended = () => {
+        activePlaybackSources = activePlaybackSources.filter(x => x !== src);
+        if (activePlaybackSources.length === 0) {
+          document.getElementById('interrupt-btn').classList.add('hidden');
+        }
+      };
+    }
+
+    function stopLiveVoiceSession() {
+      isLiveSessionActive = false;
+      interruptJarvisAudio();
+      if (micProcessor) { try { micProcessor.disconnect(); } catch (e) {} micProcessor = null; }
+      if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+      if (liveWs) { try { liveWs.close(); } catch (e) {} liveWs = null; }
+      document.getElementById('live-voice-label').textContent = 'Живой голос';
+      setReactorMode('STANDBY');
+      setSubtitles('СИСТЕМА', 'Голосовой поток остановлен.');
+    }
+
+    async function startLiveVoiceSession() {
+      if (!geminiApiKey) {
+        triggerCentralCoreVoice();
+        return;
+      }
+      if (isLiveSessionActive) {
+        stopLiveVoiceSession();
+        return;
+      }
+
+      try {
+        audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        if (audioCtx.state === 'suspended') await audioCtx.resume();
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true } });
+
+        const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(geminiApiKey)}`;
+        liveWs = new WebSocket(wsUrl);
+        document.getElementById('live-voice-label').textContent = 'Соединение...';
+
+        liveWs.onopen = () => {
+          isLiveSessionActive = true;
+          document.getElementById('live-voice-label').textContent = 'Стоп Live';
+          setReactorMode('LIVE VOICE');
+          setSubtitles('J.A.R.V.I.S. LIVE', 'Слушаю в реальном времени. Можешь перебивать меня голосом!');
+
+          liveWs.send(JSON.stringify({
+            setup: {
+              model: "models/gemini-3.8-live",
+              generationConfig: {
+                responseModalities: ["AUDIO"],
+                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } } }
+              },
+              systemInstruction: {
+                parts: [{ text: "Ты J.A.R.V.I.S. — живой, умный, лаконичный инженерный ИИ-ассистент Исанура (MacBook Air M5, iPad Air, Arduino Uno). Говори естественно, без роботизированных пауз. Если Исанур просит управлять Arduino, открывать YouTube/сайты, создавать сайты или запускать протоколы — вызывай инструменты." }]
+              },
+              tools: JARVIS_TOOLS
+            }
+          }));
+
+          const source = audioCtx.createMediaStreamSource(micStream);
+          micProcessor = audioCtx.createScriptProcessor(2048, 1, 1);
+          micProcessor.onaudioprocess = (e) => {
+            if (!isLiveSessionActive || !liveWs || liveWs.readyState !== WebSocket.OPEN) return;
+            const input = e.inputBuffer.getChannelData(0);
+            const pcm16 = new Int16Array(input.length);
+            let sum = 0;
+            for (let i = 0; i < input.length; i++) {
+              const s = Math.max(-1, Math.min(1, input[i]));
+              pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+              sum += Math.abs(s);
+            }
+            const avg = sum / input.length;
+            if (avg > 0.02) audioEnergyLevel = Math.min(1, avg * 6);
+
+            const bytes = new Uint8Array(pcm16.buffer);
+            let bin = '';
+            for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+            liveWs.send(JSON.stringify({
+              realtimeInput: {
+                mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: btoa(bin) }]
+              }
+            }));
+          };
+          source.connect(micProcessor);
+          micProcessor.connect(audioCtx.destination);
+        };
+
+        liveWs.onmessage = async (event) => {
+          let msg;
+          try {
+            const raw = event.data instanceof Blob ? await event.data.text() : event.data;
+            msg = JSON.parse(raw);
+          } catch (e) { return; }
+
+          if (msg.serverContent?.interrupted) {
+            interruptJarvisAudio();
+            setSubtitles('ИСАНУР (ПЕРЕБИЛ)', 'Слушаю тебя...');
+            return;
+          }
+
+          const parts = msg.serverContent?.modelTurn?.parts || [];
+          for (const p of parts) {
+            if (p.inlineData?.data && p.inlineData.mimeType?.startsWith('audio/pcm')) {
+              playPcm24kBase64(p.inlineData.data);
+            }
+            if (p.text) {
+              setSubtitles('J.A.R.V.I.S.', p.text);
+            }
+          }
+
+          if (msg.toolCall?.functionCalls) {
+            const responses = [];
+            for (const fc of msg.toolCall.functionCalls) {
+              const resObj = await dispatchJarvisTool(fc.name, fc.args || {}, 'gemini-3.8-live');
+              responses.push({ id: fc.id, name: fc.name, response: { result: resObj } });
+            }
+            if (liveWs && liveWs.readyState === WebSocket.OPEN) {
+              liveWs.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
+            }
+          }
+        };
+
+        liveWs.onerror = () => {
+          stopLiveVoiceSession();
+          triggerCentralCoreVoice();
+        };
+
+        liveWs.onclose = () => {
+          if (isLiveSessionActive) stopLiveVoiceSession();
+        };
+      } catch (err) {
+        triggerCentralCoreVoice();
+      }
+    }
+
+    document.getElementById('live-voice-btn').addEventListener('click', startLiveVoiceSession);
+    document.getElementById('interrupt-btn').addEventListener('click', interruptJarvisAudio);
+
+    function speakFallback(text) {
+      if (!ttsEnabled || isLiveSessionActive || !('speechSynthesis' in window)) return;
+      try {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'ru-RU';
+        const voices = window.speechSynthesis.getVoices();
+        const bestRu = voices.find(v => v.lang.startsWith('ru') && (v.name.includes('Premium') || v.name.includes('Enhanced') || v.name.includes('Google') || v.name.includes('Yuri') || v.name.includes('Milena'))) || voices.find(v => v.lang.startsWith('ru'));
+        if (bestRu) u.voice = bestRu;
+        u.rate = 1.06;
+        u.pitch = 0.96;
+        document.getElementById('interrupt-btn').classList.remove('hidden');
+        u.onboundary = () => { audioEnergyLevel = 0.55; };
+        u.onend = () => document.getElementById('interrupt-btn').classList.add('hidden');
+        window.speechSynthesis.speak(u);
+      } catch (e) {}
+    }
+
+    document.getElementById('tts-toggle-btn').addEventListener('click', (e) => {
+      ttsEnabled = !ttsEnabled;
+      e.target.textContent = ttsEnabled ? 'Озвучка: ВКЛ' : 'Озвучка: ВЫКЛ';
+      if (!ttsEnabled) interruptJarvisAudio();
+    });
+
+    // ================= HARDWARE ARDUINO & WEB SERIAL =================
+    function logSerial(line) {
+      const box = document.getElementById('serial-log');
+      const row = document.createElement('div');
+      row.textContent = `[${new Date().toLocaleTimeString()}] ${line}`;
+      box.appendChild(row);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    async function executeHardwareCommand(cmd) {
+      const clean = (cmd || '').trim().toUpperCase();
+      if (clean === 'RELAY:1') {
+        hwState.relay = 1;
+        document.getElementById('pin-d7-state').textContent = 'HIGH (ВКЛ)';
+        document.getElementById('hud-relay-readout').textContent = 'D7: ВКЛ';
+      } else if (clean === 'RELAY:0') {
+        hwState.relay = 0;
+        document.getElementById('pin-d7-state').textContent = 'LOW (ВЫКЛ)';
+        document.getElementById('hud-relay-readout').textContent = 'D7: ВЫКЛ';
+      } else if (clean.startsWith('SERVO:')) {
+        const deg = Math.min(180, Math.max(0, parseInt(clean.split(':')[1], 10) || 90));
+        hwState.servo = deg;
+        document.getElementById('servo-slider').value = String(deg);
+        document.getElementById('servo-angle-label').textContent = `${deg}°`;
+        document.getElementById('send-servo-btn').textContent = `SERVO:${deg}`;
+        document.getElementById('hud-servo-readout').textContent = `D9: ${deg}°`;
+      } else if (clean === 'RADAR:SCAN') {
+        hwState.radarCm = Math.floor(22 + Math.random() * 65);
+        document.getElementById('radar-cm-label').textContent = `${hwState.radarCm} см`;
+        document.getElementById('hud-radar-readout').textContent = `РАДАР: ${hwState.radarCm} см`;
+      }
+      logSerial(`TX → ${clean}`);
+      if (serialWriter) {
+        try { await serialWriter.write(clean + '\n'); } catch (err) { logSerial(`ERR: ${err.message}`); }
+      }
+    }
+
+    document.getElementById('serial-connect-btn').addEventListener('click', async () => {
+      if (!('serial' in navigator)) { showToast('Открой в Google Chrome на MacBook для Web Serial API'); return; }
+      try {
+        serialPort = await navigator.serial.requestPort();
+        await serialPort.open({ baudRate: 115200 });
+        const enc = new TextEncoderStream();
+        enc.readable.pipeTo(serialPort.writable);
+        serialWriter = enc.writable.getWriter();
+        logSerial('Arduino Uno подключена (115200 бод)');
+        showToast('USB-порт Arduino подключён!');
+      } catch (err) { logSerial(`ERR: ${err.message}`); }
+    });
+
+    document.querySelectorAll('.hw-cmd-btn').forEach(b => b.addEventListener('click', () => executeHardwareCommand(b.getAttribute('data-serial'))));
+    document.getElementById('servo-slider').addEventListener('input', (e) => {
+      document.getElementById('servo-angle-label').textContent = `${e.target.value}°`;
+      document.getElementById('send-servo-btn').textContent = `SERVO:${e.target.value}`;
+    });
+    document.getElementById('send-servo-btn').addEventListener('click', () => executeHardwareCommand(`SERVO:${document.getElementById('servo-slider').value}`));
+    document.getElementById('copy-ino-btn').addEventListener('click', () => {
+      const code = document.getElementById('arduino-code-block').innerText;
+      if (navigator.clipboard) navigator.clipboard.writeText(code).then(() => showToast('Скетч скопирован!'));
+    });
+
+    // ================= WEBSITE GENERATOR, PROTOCOLS & ANALYSES =================
+    const SITE_TEMPLATES = {
+      kinematics: {
+        title: 'Калькулятор 1D-кинематики h(t)',
+        html: `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><style>body{font-family:system-ui;background:#070d18;color:#e2e8f0;padding:18px;margin:0}h2{color:#38bdf8;margin:0 0 10px;font-size:16px}.row{display:flex;gap:12px;align-items:center;margin:8px 0;font-size:13px}input{flex:1;accent-color:#38bdf8}.kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}.box{background:#0f172a;padding:10px;border-radius:10px;text-align:center}.val{font-size:18px;font-weight:700;color:#34d399;font-family:monospace}</style></head><body><h2>Тренажёр вертикального броска: h(t) = h0 + v0·t − 4.9·t²</h2><div class="row"><span>v0: <b id="v0l">20</b> м/с</span><input id="v0" type="range" min="5" max="50" value="20"></div><div class="row"><span>h0: <b id="h0l">60</b> м</span><input id="h0" type="range" min="0" max="120" value="60"></div><div class="kpi"><div class="box">Макс H<div class="val" id="rh">80.4 м</div></div><div class="box">t подъёма<div class="val" id="rtu">2.04 с</div></div><div class="box">Полёт T<div class="val" id="rt">6.09 с</div></div></div><script>function u(){const v=+document.getElementById('v0').value,h=+document.getElementById('h0').value,g=9.8;document.getElementById('v0l').textContent=v;document.getElementById('h0l').textContent=h;document.getElementById('rh').textContent=(h+v*v/(2*g)).toFixed(1)+' м';document.getElementById('rtu').textContent=(v/g).toFixed(2)+' с';document.getElementById('rt').textContent=((v+Math.sqrt(v*v+2*g*h))/g).toFixed(2)+' с';}document.getElementById('v0').oninput=u;document.getElementById('h0').oninput=u;u();<\/script></body></html>`
+      },
+      tricopter: {
+        title: 'Калькулятор тяги Y-трикоптера',
+        html: `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><style>body{font-family:system-ui;background:#070d18;color:#e2e8f0;padding:18px;margin:0}h2{color:#34d399;margin:0 0 10px;font-size:16px}.row{display:flex;justify-content:space-between;margin:10px 0;font-size:13px}input{width:55%;accent-color:#34d399}.out{background:#0f172a;padding:12px;border-radius:10px;font-family:monospace;font-size:14px}</style></head><body><h2>Расчёт 3 моторов Y-трикоптера</h2><div class="row"><span>Масса: <b id="ml">650</b> г</span><input id="m" type="range" min="300" max="1500" value="650"></div><div class="row"><span>Тяга 1 мотора: <b id="tl">480</b> г</span><input id="t" type="range" min="200" max="1000" value="480"></div><div class="out" id="o"></div><script>function c(){const m=+document.getElementById('m').value,t=+document.getElementById('t').value;document.getElementById('ml').textContent=m;document.getElementById('tl').textContent=t;document.getElementById('o').innerHTML='Суммарная тяга: '+(t*3)+' г<br>TWR: '+((t*3)/m).toFixed(2)+' : 1<br>Газ висения: '+Math.round(m/(t*3)*100)+'%';}document.getElementById('m').oninput=c;document.getElementById('t').oninput=c;c();<\/script></body></html>`
+      },
+      cyber: {
+        title: 'Крипто-анализатор Base64 / HEX',
+        html: `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><style>body{font-family:monospace;background:#070d18;color:#38bdf8;padding:16px;margin:0}textarea{width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #1e293b;border-radius:8px;padding:10px;box-sizing:border-box}</style></head><body><div>Строка для анализа:</div><textarea id="i" rows="2">AKYLMAN_CYBER_2026</textarea><p>Base64: <span id="b" style="color:#34d399"></span></p><p>HEX: <span id="h" style="color:#facc15"></span></p><script>const i=document.getElementById('i');function r(){const s=i.value;try{document.getElementById('b').textContent=btoa(unescape(encodeURIComponent(s)));}catch(e){}document.getElementById('h').textContent=Array.from(s).map(c=>c.charCodeAt(0).toString(16).padStart(2,'0')).join(' ');}i.oninput=r;r();<\/script></body></html>`
+      }
+    };
+
+    function renderGeneratedWebsite(title, htmlCode) {
+      document.getElementById('site-preview-title').textContent = title;
+      document.getElementById('site-code-editor').value = htmlCode;
+      document.getElementById('site-preview-frame').srcdoc = htmlCode;
+    }
+
+    document.querySelectorAll('.webgen-tpl-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tpl = SITE_TEMPLATES[btn.getAttribute('data-template')];
+        if (tpl) renderGeneratedWebsite(tpl.title, tpl.html);
+      });
+    });
+    document.getElementById('webgen-apply-code-btn').addEventListener('click', () => {
+      document.getElementById('site-preview-frame').srcdoc = document.getElementById('site-code-editor').value;
+    });
+    document.getElementById('webgen-open-tab-btn').addEventListener('click', () => {
+      const blob = new Blob([document.getElementById('site-code-editor').value], { type: 'text/html;charset=utf-8' });
+      window.open(URL.createObjectURL(blob), '_blank');
+    });
+    document.getElementById('webgen-download-btn').addEventListener('click', () => {
+      const blob = new Blob([document.getElementById('site-code-editor').value], { type: 'text/html;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'jarvis_app.html';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    });
+    document.getElementById('webgen-run-btn').addEventListener('click', () => {
+      const p = document.getElementById('webgen-prompt-input').value.trim();
+      if (p) handleUserMessage(`Джарвис, создай полноценный интерактивный сайт: ${p}`);
+    });
+
+    let starkProtocols = [
+      { id: 'p1', name: 'Протокол «Олимпиада Физика»', cmds: ['RELAY:1', 'SERVO:45', 'RADAR:SCAN'], desc: 'Свет D7 + поворот камеры 45° + контроль стола.' },
+      { id: 'p2', name: 'Протокол «Стенд Трикоптера»', cmds: ['RELAY:1', 'SERVO:90', 'RADAR:SCAN'], desc: 'Питание стенда + центровка серво D9 в 90°.' },
+      { id: 'p3', name: 'Протокол «Кибер-Щит»', cmds: ['RELAY:1', 'SERVO:135', 'RADAR:SCAN'], desc: 'Сектор двери 135° + мониторинг периметра.' },
+      { id: 'p4', name: 'Протокол «Отбой»', cmds: ['RELAY:0', 'SERVO:0'], desc: 'Гасит реле D7 и паркует сервопривод.' }
+    ];
+
+    function renderProtocolsGrid() {
+      const grid = document.getElementById('protocols-grid');
+      grid.innerHTML = starkProtocols.map(p => `
+        <div class="bg-slate-950/75 border border-sky-500/20 rounded-2xl p-3 flex flex-col justify-between gap-2">
+          <div>
+            <div class="text-xs font-bold text-sky-300 mono">${p.name}</div>
+            <p class="text-[11px] text-slate-400 my-1">${p.desc}</p>
+            <div class="flex flex-wrap gap-1">${p.cmds.map(c => `<span class="text-[10px] mono px-1.5 py-0.5 rounded bg-slate-900 text-emerald-300">${c}</span>`).join('')}</div>
+          </div>
+          <button type="button" data-proto-id="${p.id}" class="run-proto-btn bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 text-xs py-1.5 rounded-lg mono">Активировать</button>
+        </div>
+      `).join('');
+      grid.querySelectorAll('.run-proto-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const f = starkProtocols.find(x => x.id === btn.getAttribute('data-proto-id'));
+          if (f) runStarkProtocol(f.name, f.cmds, f.desc);
+        });
+      });
+    }
+
+    async function runStarkProtocol(name, cmds, summary) {
+      for (const c of cmds) await executeHardwareCommand(c);
+      setSubtitles(`ПРОТОКОЛ: ${name}`, summary);
+      showToast(`Активирован: ${name}`);
+      speakFallback(`${name} активирован. ${summary}`);
+    }
+
+    document.getElementById('new-proto-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = document.getElementById('proto-name-in').value.trim();
+      const cmds = document.getElementById('proto-cmds-in').value.split(',').map(s => s.trim()).filter(Boolean);
+      const desc = document.getElementById('proto-desc-in').value.trim();
+      if (!name || !cmds.length) return;
+      starkProtocols.unshift({ id: 'p-' + Date.now(), name, cmds, desc });
+      renderProtocolsGrid();
+      document.getElementById('new-proto-form').reset();
+      showToast(`Протокол «${name}» добавлен!`);
+    });
+
+    let savedAnalyses = [
+      {
+        id: 'a1', title: 'Инженерный анализ Y-Трикоптера', model: 'gemini-4-carbon',
+        metrics: ['TWR: 2.21 : 1', 'Серво D9: ±35°', 'Запас ESC: +32%'],
+        report: '1. При массе 650 г и 3 моторах по 480 г суммарная тяга 1440 г.\n2. Висение на 45% газа.\n3. Хвостовой сервопривод на пине D9 компенсирует реактивный момент.'
+      }
+    ];
+
+    function renderAnalysisView(item) {
+      document.getElementById('analysis-title-head').textContent = `${item.title} (${item.model})`;
+      document.getElementById('analysis-metrics-grid').innerHTML = (item.metrics || []).map(m => `<div class="bg-slate-950/80 border border-sky-500/25 rounded-xl p-2 text-xs mono text-sky-300">${m}</div>`).join('');
+      document.getElementById('analysis-report-view').textContent = item.report;
+    }
+
+    function renderAnalysisHistory() {
+      const list = document.getElementById('analysis-history-list');
+      list.innerHTML = savedAnalyses.map(a => `<button type="button" data-an-id="${a.id}" class="an-item-btn text-left bg-slate-950/75 border border-sky-500/20 rounded-xl p-2 text-xs mono text-sky-300">${a.title}</button>`).join('');
+      list.querySelectorAll('.an-item-btn').forEach(b => b.addEventListener('click', () => {
+        const f = savedAnalyses.find(x => x.id === b.getAttribute('data-an-id'));
+        if (f) renderAnalysisView(f);
+      }));
+    }
+
+    document.getElementById('run-analysis-btn').addEventListener('click', () => {
+      const t = document.getElementById('analysis-topic-in').value.trim();
+      if (t) handleUserMessage(`Джарвис, сделай инженерный анализ и отчёт по теме: ${t}`);
+    });
+    document.getElementById('download-report-btn').addEventListener('click', () => {
+      const blob = new Blob([document.getElementById('analysis-report-view').textContent], { type: 'text/markdown;charset=utf-8' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'jarvis_analysis.md';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    });
+
+    // ================= GEMINI 4 CASCADE & UNIFIED TOOL DISPATCHER =================
+    const JARVIS_TOOLS = [{
+      functionDeclarations: [
+        {
+          name: "control_arduino",
+          description: "Управляет пинами Arduino Uno (RELAY:1, RELAY:0, SERVO:<0-180>, RADAR:SCAN).",
+          parameters: { type: "OBJECT", properties: { commands: { type: "ARRAY", items: { type: "STRING" } }, spoken_reply: { type: "STRING" } }, required: ["commands", "spoken_reply"] }
+        },
+        {
+          name: "create_website",
+          description: "Генерирует полноценный однофайловый сайт или калькулятор и открывает его поверх HUD.",
+          parameters: { type: "OBJECT", properties: { title: { type: "STRING" }, html_code: { type: "STRING" }, spoken_reply: { type: "STRING" } }, required: ["title", "html_code", "spoken_reply"] }
+        },
+        {
+          name: "execute_protocol",
+          description: "Запускает комплексный протокол Старка (Arduino Uno + режим).",
+          parameters: { type: "OBJECT", properties: { protocol_name: { type: "STRING" }, arduino_commands: { type: "ARRAY", items: { type: "STRING" } }, summary: { type: "STRING" } }, required: ["protocol_name", "arduino_commands", "summary"] }
+        },
+        {
+          name: "create_analysis_report",
+          description: "Формирует инженерный, физический или кибербезопасный анализ.",
+          parameters: { type: "OBJECT", properties: { title: { type: "STRING" }, metrics: { type: "ARRAY", items: { type: "STRING" } }, report_body: { type: "STRING" }, spoken_reply: { type: "STRING" } }, required: ["title", "metrics", "report_body", "spoken_reply"] }
+        },
+        {
+          name: "open_url",
+          description: "Автоматически открывает YouTube, поиск или любой внешний сайт.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              url: { type: "STRING", description: "Полный HTTPS-адрес" },
+              title: { type: "STRING", description: "Название вкладки" },
+              spoken_reply: { type: "STRING", description: "Голосовое подтверждение" }
+            },
+            required: ["url", "title", "spoken_reply"]
+          }
+        }
+      ]
+    }];
+
+    async function dispatchJarvisTool(fn, args, usedModel) {
+      if (fn === 'control_arduino') {
+        const cmds = Array.isArray(args.commands) ? args.commands : [];
+        for (const c of cmds) await executeHardwareCommand(c);
+        const reply = args.spoken_reply || `Выполнено: ${cmds.join(', ')}`;
+        setSubtitles('J.A.R.V.I.S.', reply);
+        return { ok: true, executed: cmds };
+      }
+      if (fn === 'create_website') {
+        renderGeneratedWebsite(args.title || 'Сайт J.A.R.V.I.S.', args.html_code || '<h1>Готово</h1>');
+        openOverlay('ov-webgen');
+        setSubtitles('J.A.R.V.I.S.', args.spoken_reply || 'Сайт открыт в студии.');
+        return { ok: true, opened: 'ov-webgen' };
+      }
+      if (fn === 'execute_protocol') {
+        await runStarkProtocol(args.protocol_name || 'Протокол', args.arduino_commands || ['RELAY:1'], args.summary || 'Активирован.');
+        return { ok: true };
+      }
+      if (fn === 'create_analysis_report') {
+        const item = { id: 'a-' + Date.now(), title: args.title || 'Анализ', model: usedModel, metrics: args.metrics || [], report: args.report_body || '' };
+        savedAnalyses.unshift(item);
+        renderAnalysisHistory();
+        renderAnalysisView(item);
+        openOverlay('ov-analysis');
+        setSubtitles('J.A.R.V.I.S.', args.spoken_reply || 'Отчёт сформирован.');
+        return { ok: true, opened: 'ov-analysis' };
+      }
+      if (fn === 'open_url') {
+        const rawUrl = String(args.url || 'https://www.youtube.com').trim();
+        const safeUrl = rawUrl.startsWith('https://') || rawUrl.startsWith('http://') ? rawUrl : `https://www.google.com/search?q=${encodeURIComponent(rawUrl)}`;
+        const label = args.title || safeUrl;
+        autoLaunchBrowserOrYouTube({ type: 'web', query: label, externalUrl: safeUrl, embedUrl: '', title: label });
+        const reply = args.spoken_reply || `Сразу открываю ${label}.`;
+        setSubtitles('J.A.R.V.I.S.', reply);
+        return { ok: true, url: safeUrl };
+      }
+      return { ok: false };
+    }
+
+    async function callGeminiCascade(payload) {
+      const chain = [...new Set([selectedModel, 'gemini-4-carbon', 'gemini-4-argon', 'gemini-4-hydrogen', 'gemini-2.5-flash'])];
+      let lastErr = 'Ошибка API';
+      for (const m of chain) {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${encodeURIComponent(geminiApiKey)}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!data.error && data.candidates?.length) {
+          setConnectedKeyUI(true, m);
+          return { data, usedModel: m };
+        }
+        lastErr = data.error?.message || m;
+      }
+      throw new Error(lastErr);
+    }
+
+    function appendChatMessage(role, text, badge = '') {
+      const box = document.getElementById('chat-messages');
+      const div = document.createElement('div');
+      const isUser = role === 'user';
+      div.className = isUser ? 'bg-slate-800/70 rounded-2xl p-3 ml-8' : 'bg-slate-950/75 border border-sky-500/25 rounded-2xl p-3 mr-4';
+      div.innerHTML = `<div class="flex justify-between text-[11px] mono ${isUser ? 'text-slate-400' : 'text-sky-400'} mb-1"><span>${isUser ? 'ИСАНУР' : 'J.A.R.V.I.S.'}</span>${badge ? `<span class="text-emerald-300">${badge}</span>` : ''}</div><div class="text-slate-200 whitespace-pre-wrap">${text}</div>`;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    async function handleUserMessage(promptText) {
+      if (!promptText.trim()) return;
+      appendChatMessage('user', promptText);
+      setSubtitles('ИСАНУР', promptText);
+      setReactorMode('THINKING');
+
+      // ZERO-CLICK INSTANT LAUNCH: If the user asks for YouTube/GitHub/Google, open it IMMEDIATELY during the user action before waiting for API!
+      const immediateIntent = detectImmediateUrlIntent(promptText);
+      if (immediateIntent) {
+        autoLaunchBrowserOrYouTube(immediateIntent);
+        const fastReply = `Сразу открыл ${immediateIntent.title} без лишних кликов!`;
+        appendChatMessage('jarvis', fastReply, 'AUTO-OPEN');
+        setSubtitles('J.A.R.V.I.S.', fastReply);
+        speakFallback(fastReply);
+        setReactorMode('STANDBY');
+        return;
+      }
+
+      if (!geminiApiKey) {
+        setTimeout(async () => {
+          const low = promptText.toLowerCase();
+          if (low.includes('сайт')) {
+            renderGeneratedWebsite(SITE_TEMPLATES.kinematics.title, SITE_TEMPLATES.kinematics.html);
+            openOverlay('ov-webgen');
+            appendChatMessage('jarvis', 'Открыл демо-сайт кинематики!', 'DEMO');
+          } else if (low.includes('протокол') || low.includes('свет') || low.includes('серво')) {
+            await runStarkProtocol('Протокол Олимпиада', ['RELAY:1', 'SERVO:45', 'RADAR:SCAN'], 'Свет D7 включён, серво D9 = 45°.');
+            appendChatMessage('jarvis', 'Протокол Олимпиада выполнен.', 'DEMO');
+          } else if (low.includes('анализ') || low.includes('трикоптер')) {
+            renderAnalysisView(savedAnalyses[0]);
+            openOverlay('ov-analysis');
+            appendChatMessage('jarvis', 'Инженерный анализ трикоптера открыт.', 'DEMO');
+          } else {
+            const msg = 'Вставь GEMINI_API_KEY сверху один раз — он автоматически сохранится в памяти.';
+            appendChatMessage('jarvis', msg, 'ОЖИДАНИЕ КЛЮЧА');
+            setSubtitles('J.A.R.V.I.S.', msg);
+          }
+          setReactorMode('STANDBY');
+        }, 250);
+        return;
+      }
+
+      try {
+        const { data, usedModel } = await callGeminiCascade({
+          systemInstruction: { parts: [{ text: `Ты J.A.R.V.I.S. v3.5 для Исанура. Используй инструменты control_arduino, create_website, execute_protocol, create_analysis_report, open_url. Пины: D7=${hwState.relay}, D9=${hwState.servo}°, Радар=${hwState.radarCm} см.` }] },
+          contents: [{ role: 'user', parts: [{ text: promptText }] }],
+          tools: JARVIS_TOOLS
+        });
+        const parts = data.candidates?.[0]?.content?.parts || [];
+        let handled = false, textReply = '';
+        for (const p of parts) {
+          if (p.functionCall) {
+            handled = true;
+            await dispatchJarvisTool(p.functionCall.name, p.functionCall.args || {}, usedModel);
+            const r = p.functionCall.args?.spoken_reply || p.functionCall.args?.summary || 'Команда выполнена.';
+            appendChatMessage('jarvis', r, usedModel);
+            speakFallback(r);
+          } else if (p.text) textReply += p.text;
+        }
+        if (!handled && textReply) {
+          appendChatMessage('jarvis', textReply, usedModel);
+          setSubtitles('J.A.R.V.I.S.', textReply);
+          speakFallback(textReply.slice(0, 220));
+        }
+      } catch (err) {
+        appendChatMessage('jarvis', `Ошибка API: ${err.message}`, 'ERROR');
+      }
+      setReactorMode(isLiveSessionActive ? 'LIVE VOICE' : 'STANDBY');
+    }
+
+    document.getElementById('chat-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const inp = document.getElementById('chat-input');
+      const v = inp.value; inp.value = '';
+      handleUserMessage(v);
+    });
+    document.querySelectorAll('.preset-btn').forEach(b => b.addEventListener('click', () => handleUserMessage(b.getAttribute('data-prompt'))));
+    document.getElementById('clear-chat-btn').addEventListener('click', () => { document.getElementById('chat-messages').innerHTML = ''; });
+
+    // ================= CAMERA VISION =================
+    const videoEl = document.getElementById('cam-video'), capCanvas = document.getElementById('cam-capture-canvas');
+    document.getElementById('start-cam-btn').addEventListener('click', async () => {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        videoEl.srcObject = s; videoEl.classList.remove('hidden'); capCanvas.classList.add('hidden');
+        document.getElementById('cam-placeholder').classList.add('hidden');
+      } catch (e) { showToast('Используй кнопку «Фото файла»'); }
+    });
+
+    async function sendImageToGemini(b64, mime) {
+      const out = document.getElementById('vision-output');
+      if (!geminiApiKey) { out.textContent = 'Сначала вставь GEMINI_API_KEY!'; return; }
+      out.textContent = 'Анализирую кадр...';
+      try {
+        const { data, usedModel } = await callGeminiCascade({
+          contents: [{ role: 'user', parts: [{ text: document.getElementById('vision-prompt-input').value }, { inlineData: { mimeType: mime, data: b64 } }] }]
+        });
+        out.textContent = `[${usedModel}]\n\n` + (data.candidates?.[0]?.content?.parts?.[0]?.text || 'Нет ответа');
+      } catch (err) { out.textContent = err.message; }
+    }
+
+    document.getElementById('snap-cam-btn').addEventListener('click', () => {
+      if (!videoEl.classList.contains('hidden') && videoEl.videoWidth) {
+        capCanvas.width = videoEl.videoWidth; capCanvas.height = videoEl.videoHeight;
+        capCanvas.getContext('2d').drawImage(videoEl, 0, 0);
+        videoEl.classList.add('hidden'); capCanvas.classList.remove('hidden');
+        capturedImageBase64 = capCanvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+        sendImageToGemini(capturedImageBase64, 'image/jpeg');
+      } else if (capturedImageBase64) sendImageToGemini(capturedImageBase64, capturedMimeType);
+    });
+
+    document.getElementById('file-img-input').addEventListener('change', (e) => {
+      const f = e.target.files?.[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        capturedImageBase64 = String(r.result).split(',')[1];
+        capturedMimeType = f.type || 'image/jpeg';
+        sendImageToGemini(capturedImageBase64, capturedMimeType);
+      };
+      r.readAsDataURL(f);
+    });
+
+    window.addEventListener('load', () => {
+      loadKeyFromVault();
+      initHologramHUD();
+      renderGeneratedWebsite(SITE_TEMPLATES.kinematics.title, SITE_TEMPLATES.kinematics.html);
+      renderProtocolsGrid();
+      renderAnalysisHistory();
+      renderAnalysisView(savedAnalyses[0]);
+    });
+  </script>
+</body>
+</html>
